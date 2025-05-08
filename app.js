@@ -11,13 +11,12 @@ const cors = require('cors');
 var indexRouter = require("./routes/index");
 var usersRouter = require("./routes/users");
 
-// wk10
+const swaggerUI = require('swagger-ui-express');
+const swaggerDocument = require('./docs/openapi.json');
+
 require("dotenv").config();
 
 var app = express();
-
-// console.log(process.env.JWT_SECRET);
-
 
 app.set("views", path.join(__dirname, "views"));
 app.set("view engine", "jade");
@@ -45,6 +44,8 @@ app.use(cors());
 
 app.use("/", indexRouter);
 app.use("/users", usersRouter);
+app.use('/docs', swaggerUI.serve, swaggerUI.setup(swaggerDocument))
+
 
 app.get("/knex", function (req, res, next) {
   req.db.raw("SELECT VERSION()")
@@ -77,4 +78,3 @@ app.use(function (err, req, res, next) {
 
 
 module.exports = app;
-
