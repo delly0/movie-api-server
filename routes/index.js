@@ -5,104 +5,224 @@ router.get("/", function (req, res, next) {
   res.render("index", { title: "Express" });
 });
 
-// Route: /movies/search?title=Shrek&year=2001
-router.get("/movies/search", function (req, res, next) {
-  const { title, year } = req.query;
 
-  let query = req.db
-    .from("basics")
-    .select("primaryTitle as title", "year", "id as imdbID", "imdbRating", "rottentomatoesRating", "metacriticRating", "rated as classification");
+router.get("/movies/search", async (req, res) => {
+  try {
+    const db = req.db;
+    const { title, year, page = 1 } = req.query;
+    const perPage = 100;
 
-  if (title) {
-    query = query.where("primaryTitle", "like", `%${title}%`);
-  }
-
-  if (year) {
-    if (!/^\d{4}$/.test(year)) {
-      return res.status(400).json({ Error: true, Message: "Year must be in yyyy format" });
+    // Validate year (if present)
+    if (year && isNaN(Number(year))) {
+      return res.status(400).json({
+        error: true,
+        message: "Invalid year format. Format must be yyyy.",
+      });
     }
-    query = query.where("year", "=", parseInt(year));
-  }
 
-  query
-    .then((rows) => {
-      res.json({ Error: false, Message: "Success", Movies: rows });
-    })
-    .catch((err) => {
-      console.log(err);
-      res.json({ Error: true, Message: "Error in MySQL query" });
+    // Validate page
+    const pageNum = Number(page);
+    if (isNaN(pageNum) || pageNum < 1 || !Number.isInteger(pageNum)) {
+      return res.status(400).json({
+        error: true,
+        message: "Invalid page format. page must be a number.",
+      });
+    }
+
+    const offset = (pageNum - 1) * perPage;
+
+    // Build base query
+    let query = db("basics")
+      .select(
+        "primaryTitle as title",
+        "year",
+        "tconst as imdbID",
+        "imdbRating",
+        "rottenTomatoesRating",
+        "metacriticRating",
+        "rated as classification"
+      );
+
+    // Apply filters
+    if (title) {
+      query = query.whereILike("primaryTitle", `%${title}%`);
+    }
+    if (year) {
+      query = query.andWhere("year", Number(year));
+    }
+
+    const totalQuery = query.clone();
+    const total = (await totalQuery).length;
+
+    // Apply pagination
+    const results = (await query.offset(offset).limit(perPage)).map((movie) => ({
+      ...movie,
+      imdbRating: movie.imdbRating != null ? Number(movie.imdbRating) : null,
+      rottenTomatoesRating: movie.rottenTomatoesRating != null ? Number(movie.rottenTomatoesRating) : null,
+      metacriticRating: movie.metacriticRating != null ? Number(movie.metacriticRating) : null,
+    }));
+    
+
+    const lastPage = Math.ceil(total / perPage);
+
+    res.status(200).json({
+      data: results,
+      pagination: {
+        total,
+        lastPage,
+        perPage,
+        currentPage: pageNum,
+        from: offset,
+        to: offset + results.length,
+        prevPage: pageNum > 1 ? pageNum - 1 : null,
+        nextPage: pageNum < lastPage ? pageNum + 1 : null,
+      },
     });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({
+      error: true,
+      message: "Internal server error.",
+    });
+  }
 });
 
 
-// router.get("/movies/search", function (req, res, next) {
-//   req.db
-//     .from("basics")
-//     .select("primaryTitle", "year", "id", "imdbRating", "rottentomatoesRating", "metacriticRating", "rated")
-//     .then((rows) => {
-//       res.json({ Error: false, Message: "Success", data: rows });
-//     })
-//     .catch((err) => {
-//       console.log(err);
-//       res.json({ Error: true, Message: "Error in MySQL query" });
-//     });
-// });
-
-// router.get("/movies/search/:title", function (req, res, next) { 
-//   req.db 
-//   .from("basics") 
-//   .select("primaryTitle", "year", "id", "imdbRating", "rottentomatoesRating", "metacriticRating", "rated") 
-//   .where("primaryTitle", "=", req.params.title) 
-//   .then((rows)=> { 
-//     res.json({ Error: false, Message: "Success", data: rows }); 
-//   }) 
-//   .catch((err) => { 
-//     console.log(err); 
-//     res.json({ Error: true, Message: "Error in MySQL query" }); 
-//   }); 
-// }); 
-
-// router.get("/movies/search/:year", function (req, res, next) { 
-//   req.db 
-//   .from("basics") 
-//   .select("primaryTitle", "year", "id", "imdbRating", "rottentomatoesRating", "metacriticRating", "rated") 
-//   .where("year", "=", req.params.year) 
-//   .then((rows)=> { 
-//     res.json({ Error: false, Message: "Success", data: rows }); 
-//   }) 
-//   .catch((err) => { 
-//     console.log(err); 
-//     res.json({ Error: true, Message: "Error in MySQL query" }); 
-//   }); 
-// }); 
-
-
-  //wk10
-  const authorization = require("../middleware/authorization");
-
-// week 9
-  router.post('/people/id', authorization, (req, res) => {
-    if (!req.body.City || !req.body.CountryCode || !req.body.Pop) {
-      res.status(400).json({ message: `Error updating population` });
-      console.log(`Error on request body:`, JSON.stringify(req.body));
-  
-    } else {
-      const filter = {
-        "Name": req.body.City,
-        "CountryCode": req.body.CountryCode
-        };
-      const pop = {
-        "Population": req.body.Pop
-      };
-      req.db('movies').where(filter).update(pop)
-          .then(_ => {
-          res.status(201).json({ message: `Successful update ${req.body.City}`});
-          console.log(`successful population update:`, JSON.stringify(filter));
-        }).catch(error => {
-          res.status(500).json({ message: 'Database error - not updated' });
-        })
-      } 
+router.get("/movies/data/:imdbID", async (req, res) => {
+  if (Object.keys(req.query).length > 0) {
+    return res.status(400).json({
+      error: true,
+      message: "Query parameters are not permitted."
     });
+  }
+
+  try {
+    const db = req.db;
+    const imdbID = req.params.imdbID;
+
+    const movie = await db("basics")
+      .select(
+        "primaryTitle as title",
+        "year",
+        "runtimeMinutes as runtime",
+        "genres",
+        "country",
+        "imdbRating",
+        "rottenTomatoesRating",
+        "metacriticRating",
+        "boxoffice",
+        "poster",
+        "plot"
+      )
+      .where("tconst", imdbID)
+      .first();
+
+    if (!movie) {
+      return res.status(404).json({ error: true, message: "Movie not found." });
+    }
+
+    const principals = await db("principals")
+      .select(
+        "principals.nconst",
+        "principals.category",
+        "names.primaryName as name",
+        "principals.characters"
+      )
+      .join("names", "principals.nconst", "=", "names.nconst")
+      .where("principals.tconst", imdbID);
+
+    const ratings = [];
+    if (movie.imdbRating) {
+      ratings.push({ source: "Internet Movie Database", value: Number(movie.imdbRating) });
+    }
+    if (movie.rottenTomatoesRating) {
+      ratings.push({ source: "Rotten Tomatoes", value: Number(movie.rottenTomatoesRating) });
+    }
+    if (movie.metacriticRating) {
+      ratings.push({ source: "Metacritic", value: Number(movie.metacriticRating) });
+    }
+
+    res.status(200).json({
+      title: movie.title,
+      year: movie.year,
+      runtime: movie.runtime,
+      genres: movie.genres ? movie.genres.split(",") : [],
+      country: movie.country,
+      ratings,
+      boxoffice: movie.boxoffice,
+      poster: movie.poster,
+      plot: movie.plot,
+      principals: principals.map(p => ({
+        id: p.nconst,
+        name: p.name,
+        category: p.category,
+        characters: p.characters ? JSON.parse(p.characters) : []
+      }))
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: true, message: "Internal server error." });
+  }
+});
+
+
+
+const authorization = require("../middleware/authorization");
+
+router.get('/people/:id', authorization, async (req, res) => {
+  try {
+    if (Object.keys(req.query).length > 0) {
+      return res.status(400).json({
+        error: true,
+        message: "Query parameters are not permitted."
+      });
+    }
+    
+    const db = req.db;
+    const id = req.params.id;
+
+    const person = await db("names")
+      .select(
+        "primaryName as name", 
+        "birthYear", 
+        "deathYear")
+      .where("nconst", id)
+      .first();
+
+    if (!person) {
+      return res.status(404).json({ error: true, message: "Person not found." });
+    }
+
+    const roles = await db("principals")
+      .select(
+        "principals.tconst",
+        "principals.category",
+        "principals.characters",
+        "basics.primaryTitle as movieName",
+        "basics.imdbRating"
+      )
+      .join("basics", "principals.tconst", "=", "basics.tconst")
+      .where("principals.nconst", id);
+
+    const rolesFormatted = roles.map(role => ({
+      movieName: role.movieName,
+      movieId: role.tconst,
+      category: role.category,
+      characters: role.characters ? JSON.parse(role.characters) : [],
+      imdbRating: role.imdbRating ? Number(role.imdbRating) : null
+    }));
+
+    res.status(200).json({
+      name: person.name,
+      birthYear: person.birthYear,
+      deathYear: person.deathYear,
+      roles: rolesFormatted
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: true, message: "Internal server error." });
+  }
+});
 
   
 
