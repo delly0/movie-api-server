@@ -1038,6 +1038,239 @@
           }
         }
       }
+    },
+    "/user/{email}/profile": {
+      "get": {
+        "tags": ["Profile"],
+        "description": "Fetches the profile of a user by email. The response varies based on authorization status.",
+        "parameters": [
+          {
+            "name": "email",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "email"
+            },
+            "description": "The email of the user whose profile is to be fetched."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successfully retrieved profile",
+            "content": {
+              "application/json": {
+                "examples": {
+                  "authorized": {
+                    "value": {
+                      "email": "mike@gmail.com",
+                      "firstName": "Michael",
+                      "lastName": "Jordan",
+                      "dob": "1963-02-17",
+                      "address": "123 Fake Street, Springfield"
+                    }
+                  },
+                  "unauthorized": {
+                    "value": {
+                      "email": "mike@gmail.com",
+                      "firstName": "Michael",
+                      "lastName": "Jordan"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized access",
+            "content": {
+              "application/json": {
+                "examples": {
+                  "expired_token": {
+                    "value": {
+                      "error": true,
+                      "message": "JWT token has expired"
+                    }
+                  },
+                  "invalid_token": {
+                    "value": {
+                      "error": true,
+                      "message": "Invalid JWT token"
+                    }
+                  },
+                  "malformed_header": {
+                    "value": {
+                      "error": true,
+                      "message": "Authorization header is malformed"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "User not found",
+            "content": {
+              "application/json": {
+                "value": {
+                  "error": true,
+                  "message": "User not found"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": ["Profile"],
+        "description": "Updates the profile information for a user. Users can only update their own profile.",
+        "parameters": [
+          {
+            "name": "email",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "email"
+            },
+            "description": "The email of the user whose profile is to be updated."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "firstName": {
+                    "type": "string"
+                  },
+                  "lastName": {
+                    "type": "string"
+                  },
+                  "dob": {
+                    "type": "string",
+                    "format": "date"
+                  },
+                  "address": {
+                    "type": "string"
+                  }
+                },
+                "required": ["firstName", "lastName", "dob", "address"]
+              },
+              "examples": {
+                "valid_profile": {
+                  "value": {
+                    "firstName": "Michael",
+                    "lastName": "Jordan",
+                    "dob": "1963-02-17",
+                    "address": "123 Fake Street, Springfield"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Profile updated successfully",
+            "content": {
+              "application/json": {
+                "value": {
+                  "email": "mike@gmail.com",
+                  "firstName": "Michael",
+                  "lastName": "Jordan",
+                  "dob": "1963-02-17",
+                  "address": "123 Fake Street, Springfield"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized access",
+            "content": {
+              "application/json": {
+                "examples": {
+                  "header_missing": {
+                    "value": {
+                      "error": true,
+                      "message": "Authorization header ('Bearer token') not found"
+                    }
+                  },
+                  "expired_token": {
+                    "value": {
+                      "error": true,
+                      "message": "JWT token has expired"
+                    }
+                  },
+                  "invalid_token": {
+                    "value": {
+                      "error": true,
+                      "message": "Invalid JWT token"
+                    }
+                  },
+                  "malformed_header": {
+                    "value": {
+                      "error": true,
+                      "message": "Authorization header is malformed"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden: Cannot update another user's profile",
+            "content": {
+              "application/json": {
+                "value": {
+                  "error": true,
+                  "message": "Forbidden"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "User not found",
+            "content": {
+              "application/json": {
+                "value": {
+                  "error": true,
+                  "message": "User not found"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request: Invalid or incomplete profile data",
+            "content": {
+              "application/json": {
+                "examples": {
+                  "missing_fields": {
+                    "value": {
+                      "error": true,
+                      "message": "Request body incomplete: firstName, lastName, dob and address are required"
+                    }
+                  },
+                  "invalid_fields": {
+                    "value": {
+                      "error": true,
+                      "message": "Request body invalid: firstName, lastName, dob and address must be strings only"
+                    }
+                  },
+                  "invalid_dob": {
+                    "value": {
+                      "error": true,
+                      "message": "Invalid input: dob must be a real date in format YYYY-MM-DD"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
     }
   }
 }

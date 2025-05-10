@@ -7,16 +7,17 @@ var logger = require("morgan");
 const options = require("./knexfile.js");
 const knex = require("knex")(options);
 const cors = require('cors');
-
-var indexRouter = require("./routes/index");
-var usersRouter = require("./routes/users");
-
 const swaggerUI = require('swagger-ui-express');
 const swaggerDocument = require('./docs/openapi.json');
+
+const moviesRouter = require('./routes/movies');
+const peopleRouter = require('./routes/people');
+var userRouter = require("./routes/user");
 
 require("dotenv").config();
 
 var app = express();
+
 
 app.set("views", path.join(__dirname, "views"));
 app.set("view engine", "jade");
@@ -27,7 +28,6 @@ logger.token('res', (req, res) => {
   res.getHeaderNames().map(h => headers[h] = res.getHeader(h))
   return JSON.stringify(headers)
 }) 
-
 app.use(logger(':method :url :status :res'));
 
 app.use(express.json());
@@ -39,22 +39,20 @@ req.db = knex;
 next();
 });
 
-
-
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(cors());
 
-app.use("/", indexRouter);
-app.use("/user", usersRouter);
-app.use('/docs', swaggerUI.serve, swaggerUI.setup(swaggerDocument))
-
+app.use('/', swaggerUI.serve);
+app.get('/', swaggerUI.setup(swaggerDocument));
+app.use("/user", userRouter);
+app.use('/movies', moviesRouter);
+app.use('/people', peopleRouter);
 
 
 app.get("/knex", function (req, res, next) {
   req.db.raw("SELECT VERSION()")
     .then((version) => console.log(version[0][0]))
     .catch((err) => {
-      console.log(err);
       throw err;
     });
 
@@ -81,3 +79,4 @@ app.use(function (err, req, res, next) {
 
 
 module.exports = app;
+

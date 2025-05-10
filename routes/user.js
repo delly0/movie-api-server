@@ -4,6 +4,7 @@ var router = express.Router();
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcrypt');
 const refreshTokenStore = new Map();
+const authorization = require("../middleware/authorization");
 
 
 router.get('/', function(req, res, next) {
@@ -119,97 +120,6 @@ router.post('/register', function (req, res, next) {
   });
 });
 
-
-
-// router.post('/refresh', function (req, res, next) {
-//   const refreshToken = req.body.refreshToken;
-
-//   if (!refreshToken) {
-//     return res.status(400).json({
-//       error: true,
-//       message: "Request body incomplete, refresh token required"
-//     });
-//   }
-
-//   const tokenData = refreshTokenStore.get(refreshToken);
-
-//   // Token not in store = invalid
-//   if (!tokenData) {
-//     console.log("error1");
-//     return res.status(401).json({
-//       error: true,
-//       message: "Invalid JWT token"
-//     });
-//   }
-
-//   // Check expiry
-//   if (Date.now() > tokenData.expiry) {
-//     console.log("error");
-//     return res.status(401).json({
-//       error: true,
-//       message: "JWT token has expired"
-//     });
-//   }
-
-//   try {
-//     console.log("trying to refresh");
-
-//     try {
-//         // Decode the original token to get the user email
-//         console.log("JWT_SECRET:", process.env.JWT_SECRET);
-//         const decoded = jwt.verify(refreshToken, process.env.JWT_SECRET, { ignoreExpiration: true });
-//         const decodedToken = jwt.decode(refreshToken);
-//         const email = decoded.email;
-//     } catch (err) {
-//         console.error("Error verifying JWT:", err);
-//     }
-
-//     console.log("am i getting to this point?");
-//     // Generate new bearer token
-//     const bearerExpiresIn = 600; // 10 minutes
-//     const bearerExp = Math.floor(Date.now() / 1000) + bearerExpiresIn;
-//     // const bearerToken = jwt.sign({ email: bearerExp }, process.env.JWT_SECRET);
-//     console.log("new bearer token: ", bearerToken);
-
-//     // re-issue a fresh refresh token with new expiry
-//     const refreshExpiresIn = 86400; // 1 day
-//     // const newRefreshToken = jwt.sign({ email, exp: refreshExp }, process.env.JWT_SECRET);
-//     const refreshExp = Math.floor(Date.now() / 1000) + refreshExpiresIn;
-//     console.log("checkpoint 1");
-//     const newRefreshToken = jwt.sign({ email, exp: refreshExp }, process.env.JWT_SECRET);
-
-//     console.log("checkpoint 2");
-
-//     // Store new refresh token and remove old one
-//     refreshTokenStore.set(newRefreshToken, {
-//       email,
-//       expiry: refreshExp * 1000
-//     });
-
-//     console.log("checkpoint 3");
-
-//     res.status(200).json({
-//       bearerToken: {
-//         token: bearerToken,
-//         token_type: "Bearer",
-//         expires_in: bearerExpiresIn
-//       },
-//       refreshToken: {
-//         token: newRefreshToken,
-//         token_type: "Refresh",
-//         expires_in: refreshExpiresIn
-//       }
-//     });
-//   } catch (err) {
-//     // JWT verification failed (token tampered or expired)
-//     return res.status(401).json({
-//       error: true,
-//       message: "Invalid JWT token"
-//     });
-//   }
-// });
-
-
 router.post('/refresh', function (req, res, next) {
   const refreshToken = req.body.refreshToken;
 
@@ -239,7 +149,7 @@ router.post('/refresh', function (req, res, next) {
 
   try {
     const decoded = jwt.verify(refreshToken, process.env.JWT_SECRET, { ignoreExpiration: true });
-    email = decoded.email; // assign here
+    email = decoded.email;
   } catch (err) {
     return res.status(401).json({
       error: true,
@@ -292,7 +202,6 @@ router.post('/logout', function (req, res, next) {
   }
 
   const tokenData = refreshTokenStore.get(refreshToken);
-  console.log(tokenData);
 
   // Token not in store = invalid
   if (tokenData ==  null) {
@@ -320,7 +229,177 @@ router.post('/logout', function (req, res, next) {
   });
 });
 
+const nonStrictAuth = require('../middleware/nonStrictAuth');
 
+
+
+
+router.get("/:email/profile", nonStrictAuth, async (req, res) => {
+  const requestedEmail = req.params.email;
+
+  try {
+    const query = await req.db.from("users").select("*").where("email", "=", requestedEmail);
+    if (query.length === 0) {
+      return res.status(404).json({
+        error: true,
+        message: "User not found"
+      });
+    }
+
+    const user = query[0];
+    const requesterEmail = req.user?.email;
+    const isOwner = requesterEmail === requestedEmail;
+
+    const responseData = {
+      email: user.email,
+      firstName: user.firstName || null,
+      lastName: user.lastName || null,
+    };
+
+    if (isOwner) {
+      if (user.dob) {
+        const dob = new Date(user.dob);
+        const year = dob.getFullYear();
+        const month = String(dob.getMonth() + 1).padStart(2, '0');
+        const day = String(dob.getDate()).padStart(2, '0');
+        responseData.dob = `${year}-${month}-${day}`;
+      } else {
+        responseData.dob = null;
+      }
+      
+      responseData.address = user.address || null;
+    }
+
+    return res.status(200).json(responseData);
+
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({
+      error: true,
+      message: "An unexpected error occurred"
+    });
+  }
+});
+
+
+
+function isValidDate(year, month, day) {
+  // Check if month is valid (0-11 for JavaScript Date object)
+  if (month < 0 || month > 11) return false;
+
+  const daysInMonth = new Date(year, month + 1, 0).getDate(); // Get the number of days in the given month
+
+  // Check if day is valid for the given month
+  return day > 0 && day <= daysInMonth;
+}
+
+
+router.put('/:email/profile', authorization, async (req, res) => {
+  const requestedEmail = req.params.email;
+  const requesterEmail = req.user?.email;
+
+  // 1. Check if the user making the request is the same as the target user
+  if (requestedEmail !== requesterEmail) {
+    return res.status(403).json({
+      error: true,
+      message: "Forbidden"
+    });
+  }
+
+  // 2. Extract profile fields from body
+  const { firstName, lastName, dob, address } = req.body;
+
+  // 3. Validate required fields and ensure they are strings
+  if (!firstName || !lastName || !dob || !address) {
+    return res.status(400).json({
+      error: true,
+      message: "Request body incomplete: firstName, lastName, dob and address are required."
+    });
+  }
+
+  // Check if firstName, lastName, and address are all strings
+  if (
+    typeof firstName !== 'string' ||
+    typeof lastName !== 'string' ||
+    typeof address !== 'string'
+  ) {
+    return res.status(400).json({
+      error: true,
+      message: "Request body invalid: firstName, lastName and address must be strings only."
+    });
+  }
+
+  // 4. Validate date of birth (dob)
+  const dobPattern = /^\d{4}-\d{2}-\d{2}$/;
+  if (!dob.match(dobPattern)) {
+    return res.status(400).json({
+      error: true,
+      message: "Invalid input: dob must be a real date in format YYYY-MM-DD."
+    });
+  }
+
+  const [year, month, day] = dob.split('-').map(num => parseInt(num, 10));
+
+  // Check if the date is valid (e.g., April 31st is invalid)
+  if (!isValidDate(year, month - 1, day)) {
+    return res.status(400).json({
+      error: true,
+      message: "Invalid input: dob must be a real date in format YYYY-MM-DD."
+    });
+  }
+
+  const dateOfBirth = new Date(dob);
+
+  // Check if dob is a valid date
+  if (isNaN(dateOfBirth.getTime())) {
+    return res.status(400).json({
+      error: true,
+      message: "Invalid input: dob must be a real date in format YYYY-MM-DD."
+    });
+  }
+
+  // Check if dob is in the future
+  if (dateOfBirth > new Date()) {
+    return res.status(400).json({
+      error: true,
+      message: "Invalid input: dob must be a date in the past."
+    });
+  }
+
+  try {
+    // 5. Check if user exists
+    const users = await req.db.from("users").select("*").where("email", "=", requestedEmail);
+    if (users.length === 0) {
+      return res.status(404).json({
+        error: true,
+        message: "User not found"
+      });
+    }
+
+    // 6. Update user profile
+    await req.db("users").where("email", "=", requestedEmail).update({
+      firstName,
+      lastName,
+      dob,
+      address
+    });
+
+    // Return updated profile data
+    return res.status(200).json({
+      email: requestedEmail,
+      firstName: firstName || null,
+      lastName: lastName || null,
+      dob: dob || null,
+      address: address || null
+    });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({
+      error: true,
+      message: "An unexpected error occurred"
+    });
+  }
+});
 
 
 module.exports = router;
