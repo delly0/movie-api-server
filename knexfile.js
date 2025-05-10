@@ -5,6 +5,6 @@ module.exports = {
       port: 3306,
       database: 'movies',
       user: 'root',
-      password: 'Adele2003'
+      password: 'Cab210!'
     }
   };
